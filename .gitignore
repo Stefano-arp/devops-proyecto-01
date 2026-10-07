@@ -4,6 +4,16 @@ coverage/
 .env
 .env.*
 !.env.example
+# Llaves y credenciales locales: siempre en GitHub Secrets, nunca en Git.
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*known_hosts*
+.ssh/
+.aws/
 *.sqlite
 *.sqlite-*
 backup_*

@@ -95,13 +95,15 @@ docker run --rm --name devops-practica-local \
 
 Si no arranca, revisar `docker logs devops-practica-local`, permisos del directorio montado y correspondencia entre puerto/configuración del código y Dockerfile. No ejecutar simultáneamente otra aplicación que ya utilice el puerto 3000 del host.
 
-## Preparación de servicios externos (no automatizable desde este documento)
+## Configuración pendiente: servicios externos
+
+> **Estado de Git:** `main` ya está conectado a `origin/main` y el código está comprometido en el primer commit. **No ejecutes `git init` ni `git remote add origin` de nuevo.** Si el primer workflow aparece rojo por falta de Secrets o EC2, configura primero los servicios descritos aquí; después crea y envía un **nuevo commit** para volver a disparar CI/CD. Nunca publiques las credenciales para intentar corregirlo.
 
 ### 1. GitHub y Docker Hub
 
-1. Crear un repositorio **vacío** de GitHub propio y configurar sus Secrets y la EC2 antes del primer `push` a `main` (ese primer push ya intenta desplegar). Este directorio ya tiene un repositorio Git local iniciado en `main`: después de configurar los servicios, ejecutar `git remote add origin git@github.com:TU_USUARIO/TU_REPO.git`, `git add .`, `git status --short`, `git commit -m "Implementar API y CI/CD"` y `git push -u origin main`, sustituyendo usuario y repositorio. Revisar el estado antes del commit: nunca deben aparecer `rutas`, bases SQLite, respaldos, claves o el instalador Docker Desktop. Proteger `main` con la comprobación de CI como requisito para fusionar. `pull_request` y `push` a `main` ejecutan instalación reproducible, pruebas y cobertura. La publicación y el despliegue **solo** se disparan en `push` a `main` tras pasar CI; no se entregan secretos de producción a PR de colaboradores externos.
-2. En Docker Hub, crear la cuenta y un repositorio de imágenes (por ejemplo, `DOCKERHUB_USERNAME/devops-practica`) con la visibilidad apropiada; generar un **access token** con los permisos necesarios para publicar, no usar la contraseña de la cuenta. Revisar que el nombre del repositorio en workflow, comando `docker pull` y script sea exactamente el mismo.
-3. En GitHub, entrar a **Settings → Secrets and variables → Actions → New repository secret** (o crear secretos en un Environment protegido si el workflow lo utiliza). Registrar los seis valores siguientes sin introducirlos en archivos ni logs:
+1. Revisar GitHub → pestaña **Actions** → primer workflow: debe ejecutar el job `test`; los jobs `publish` y `deploy` necesitan Secrets y EC2. Proteger `main` con el job `test` como comprobación obligatoria para fusionar PR, si el plan de GitHub lo permite. `pull_request` y `push` a `main` ejecutan CI; **solo el push** publica y despliega después de aprobar las pruebas. No proporcionar Secrets a PR de colaboradores externos.
+2. En Docker Hub: **Repositories → Create repository**, nombre exacto `devops-practica` dentro de tu usuario/namespace; para simplificar la demo elegir visibilidad **Public**. Después ir a **Account settings → Personal access tokens → Generate new token** y generar uno con permiso de lectura/escritura. Copiarlo una sola vez a un gestor de contraseñas; **no** compartirlo aquí ni usar la contraseña de la cuenta. El nombre del repositorio debe coincidir con `.github/workflows/main.yml` y `scripts/deploy.sh`.
+3. **Después de preparar la EC2 y verificar su huella SSH en la sección 2**, volver a GitHub → repositorio → **Settings → Secrets and variables → Actions → New repository secret**. Registrar los seis valores siguientes sin introducirlos en archivos ni logs; crear **Repository secrets**, pues el workflow actual no declara un Environment:
 
 | Secret | Valor que debe aportar el operador |
 | --- | --- |
@@ -116,9 +118,26 @@ La variable `${{ github.sha }}` de GitHub Actions identifica el commit: se publi
 
 ### 2. EC2 Ubuntu, red y acceso SSH
 
-1. En AWS EC2, crear una instancia **Ubuntu Server** compatible con Docker (arquitectura de imagen y CPU coherentes), almacenamiento suficiente para imágenes, logs y backups; conservar el par de claves SSH de forma segura. Si se desea una dirección estable, asignar Elastic IP o DNS; los valores reales se aportan en secretos, **no** en este documento. Tener presente los costos de EC2/Elastic IP.
-2. Crear el security group: permitir **TCP 80** al público que consultará la demo; permitir **TCP 22** únicamente a orígenes autorizados. Si el runner hospedado por GitHub no dispone de IP fija, planificar un acceso SSH seguro (runner propio o túnel/red controlada, o regla temporal acotada y retirada tras el despliegue); un `push` no podrá desplegar si el runner no alcanza el puerto 22. No abrir públicamente 3000/3001/3002 ni SQLite; para 443 se necesita TLS configurado aparte.
-3. Desde un equipo autorizado, comprobar en la consola de AWS el DNS y la huella SSH del host **por canal confiable**. `ssh-keyscan` solo obtiene una clave, no certifica su identidad: comparar su huella `ssh-keygen -lf` con la verificada antes de usarla como `EC2_KNOWN_HOSTS`. Probar `ssh -i /ruta/a/clave ubuntu@<DNS_O_IP_EC2>` con permisos `chmod 600 /ruta/a/clave`. No copiar la clave privada a la instancia ni imprimirla en un workflow.
+1. En **AWS → EC2 → Launch instance**, elegir **Ubuntu Server 24.04 LTS x86_64** (coincide con la imagen amd64 publicada por el workflow), tipo con memoria suficiente para Docker/Nginx —por ejemplo, **t3.small, 2 GiB**, sujeto a disponibilidad y costo— y **al menos 20 GiB** de EBS para imágenes y datos de esta práctica. Seleccionar o crear un key pair RSA/ED25519 descargando el `.pem` solo en tu equipo; crear/seleccionar el security group del paso siguiente. Confirmar que la instancia tiene IP/DNS público y salida a Internet. Si quieres dirección estable, estudiar Elastic IP y sus cargos; guardar la dirección **solo** en Secrets, no en el repositorio. Si usas IP pública temporal y cambia al detener/iniciar la VM, actualizar `EC2_HOST` y volver a verificar el host de `EC2_KNOWN_HOSTS`. Detener/eliminar recursos al acabar para evitar costos.
+2. En **EC2 → Security Groups → Inbound rules**, permitir **TCP 80 desde 0.0.0.0/0** para la demostración y **TCP 22** desde el origen del operador y del runner que realizará el deploy; permitir salida HTTPS (443) para obtener las imágenes. **Importante:** restringir SSH a «Mi IP» permite entrar desde tu PC, **pero bloquea a un GitHub-hosted runner**, que normalmente sale por otra IP variable. Para la demostración académica puedes habilitar **temporalmente** TCP 22 desde 0.0.0.0/0 con autenticación estricta por clave y retirarlo al finalizar; eso aumenta el riesgo y los despliegues posteriores dejarán de funcionar hasta reabrir el acceso. Para despliegue continuo con SSH más seguro, usar runner propio/bastión con IP fija y limitar 22 a esa IP. No abrir públicamente 3000, 3001, 3002 ni 6061. Esta API usa HTTP, no HTTPS; no transmitir información sensible.
+3. En EC2 → **Instances → tu instancia**, copiar el DNS/IP pública; guardarla **solo** en el Secret `EC2_HOST`. En tu PC sustituir los marcadores y recoger la clave pública SSH del servidor:
+
+```bash
+export EC2_HOST='TU_DNS_O_IP_EC2'
+export PEM="$HOME/Downloads/TU_CLAVE.pem"
+chmod 600 "$PEM"
+ssh-keyscan -T 5 -t ed25519 "$EC2_HOST" > "$HOME/ec2_known_hosts"
+ssh-keygen -lf "$HOME/ec2_known_hosts"
+```
+
+**Antes de confiar en esa clave o entrar por SSH**, comparar la huella mostrada con la del servidor obtenida por un canal independiente y confiable (por ejemplo, consola/Session Manager de AWS, si está disponible, ejecutando allí `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`). `ssh-keyscan` no verifica por sí solo la identidad; si no puedes validar la huella, consulta al administrador de AWS antes de guardar el Secret. Tras confirmarla:
+
+```bash
+ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/ec2_known_hosts" \
+  -i "$PEM" "ubuntu@$EC2_HOST"
+```
+
+Copiar el **contenido completo de `ec2_known_hosts`** al Secret `EC2_KNOWN_HOSTS`. El Secret `EC2_SSH_KEY` contiene el PEM completo, incluidos encabezado, pie y saltos de línea; el workflow usa SSH no interactivo, por lo que una clave con passphrase requiere adaptar el workflow/ssh-agent. No copiar la clave privada a EC2 ni imprimirla en Actions.
 4. En una VM **Ubuntu nueva y dedicada**, instalar el paquete Docker Engine de los repositorios de Ubuntu junto con Nginx y curl (o seguir la [guía oficial de Docker](https://docs.docker.com/engine/install/ubuntu/) para usar sus paquetes, sin mezclar ambos orígenes). Habilitar servicios, preparar el volumen y conceder acceso a Docker al usuario SSH autorizado:
 
 ```bash
@@ -127,10 +146,18 @@ sudo apt install -y docker.io nginx curl
 sudo systemctl enable --now docker nginx
 sudo install -d -o 1000 -g 1000 -m 750 /opt/devops-practica/data
 sudo usermod -aG docker "$USER"
-# Sal de SSH y vuelve a entrar para aplicar la nueva membresía al grupo.
+# Ahora sal de SSH y vuelve a entrar para aplicar la nueva membresía al grupo.
+```
+
+En la nueva sesión SSH:
+
+```bash
 docker info
+sudo -n true
 sudo -n nginx -t
 ```
+
+**Los tres comandos deben funcionar** sin pedir contraseña para que el deploy no interactivo pueda continuar. Si `sudo -n true` falla, ajustar explícitamente permisos de despliegue con el administrador de la instancia: el job remoto es no interactivo y no puede introducir una contraseña.
 
 El UID 1000 corresponde al usuario `node` de la imagen prevista; comprobarlo con `docker image inspect`/`docker run id` si se cambia la imagen. En una VM ya utilizada, inspeccionar el propietario de `/opt/devops-practica/data` antes de modificar permisos; nunca aplicar `chmod 777` ni sobrescribir una base existente.
 
@@ -138,7 +165,15 @@ El usuario SSH que ejecuta `scripts/deploy.sh` debe tener acceso a Docker y `sud
 
 ### 3. Nginx y conmutación blue/green
 
-El proyecto incluye `nginx/devops-practica.conf`, `nginx/blue.conf` y `nginx/green.conf`. En una VM **dedicada y nueva**, si Nginx conserva el sitio de ejemplo, ejecutar `sudo rm /etc/nginx/sites-enabled/default` y luego `sudo nginx -t && sudo systemctl reload nginx` **solo si no sirve otro sitio**. El primer despliegue instala el sitio administrado en `/etc/nginx/conf.d/devops-practica.conf` y los upstreams en `/opt/devops-practica/nginx/`. No instalar otra copia manualmente en `sites-available`: el script rechaza configuraciones parciales o diferentes. La configuración usa este patrón (consultar los archivos reales para todos los encabezados HTTP):
+El proyecto incluye `nginx/devops-practica.conf`, `nginx/blue.conf` y `nginx/green.conf`. **Solo en una VM nueva dedicada que no sirve otros sitios**, ejecutar en EC2:
+
+```bash
+if [ -L /etc/nginx/sites-enabled/default ]; then sudo rm /etc/nginx/sites-enabled/default; fi
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+El primer despliegue instala automáticamente el sitio administrado en `/etc/nginx/conf.d/devops-practica.conf` y los upstreams en `/opt/devops-practica/nginx/`. No instalar otra copia manualmente en `sites-available`: el script rechaza configuraciones parciales o diferentes. La configuración usa este patrón (consultar los archivos reales para todos los encabezados HTTP):
 
 ```nginx
 server {
@@ -158,6 +193,29 @@ Secuencia de `scripts/deploy.sh` invocado por `.github/workflows/main.yml`: dete
 
 **Límites y riesgos:** blue/green en **una sola máquina** no da alta disponibilidad ante caída de EC2/Nginx; la recarga puede afectar conexiones en curso. Durante la transición ambos procesos pueden abrir la misma SQLite: coordinar migraciones antes de cambiar tráfico; no ejecutar dos migradores concurrentes ni cambiar esquema de forma incompatible con la versión anterior. SQLite serializa escritores y puede devolver `SQLITE_BUSY`; la conexión configura `PRAGMA journal_mode=WAL` y `busy_timeout=5000`, pero deben medirse la carga y los errores reales antes de usarlo en producción. Hacer respaldos consistentes antes de migrar (API de backup de SQLite o parada/checkpoint apropiado; no copiar a ciegas solo el `.sqlite` si hay WAL), probar restauración y proteger backups. Revertir la imagen **no revierte el esquema ni los datos**. No montar el fichero de SQLite mediante NFS entre hosts para este diseño.
 
+### 4. Activar el primer despliegue completo (Git ya conectado)
+
+**Orden:** primero confirmar Docker Hub, EC2, security group, Nginx y los seis Secrets. El primer commit ya está en `origin/main`; si el workflow inicial falló por falta de credenciales, **no hace falta borrar ni recrear el repositorio**. Desde tu PC, en la raíz de este proyecto, enviar un nuevo commit:
+
+```bash
+npm ci
+npm run test:coverage
+git status --short                  # revisar qué archivos van a publicarse
+git add README.md .gitignore         # guía y exclusiones; no claves ni bases SQLite
+git commit -m "Documentar despliegue y entrega"
+git push origin main
+git rev-parse HEAD                   # anotar el SHA exacto para compararlo
+```
+
+Si cambias otros archivos legítimos, agrégalos explícitamente después de revisar `git status --short`; nunca agregues `.pem`, `.env`, archivos SQLite ni `rutas`. En **GitHub → Actions → ejecución de ese SHA** verificar los jobs en orden `test` → `publish` → `deploy`, todos verdes. En **Docker Hub → Repositories → devops-practica → Tags**, buscar `latest` y el tag con ese SHA. Desde tu PC, con `API_HOST` definido como se explica más adelante:
+
+```bash
+curl -fsS -i "http://$API_HOST/api/health"
+curl -fsS -i "http://$API_HOST/api/items"
+```
+
+La respuesta de salud debe mostrar `version` igual al SHA del push. En EC2, `docker ps -a --filter label=app=devops-practica` debe mostrar el contenedor nuevo activo y, tras un **segundo** despliegue, el anterior detenido; `sudo nginx -t` debe indicar configuración válida. Si `test` falla, repetir `npm ci && npm run test:coverage` localmente; si `publish` falla, revisar nombre del repositorio y permiso del PAT sin imprimirlo; si `deploy` falla, revisar **Security Group TCP 22 desde el runner**, el usuario/clave/huella SSH, `docker info`, `sudo -n true` y `sudo nginx -t`. No ejecutar a mano `scripts/deploy.sh` sin suministrar las tres líneas esperadas por entrada estándar.
+
 ## Verificación y evidencia para la entrega
 
 **Solo después de ejecutar realmente el pipeline/despliegue**, registrar fecha, commit SHA, ambiente y resultados en `reporte.tex`; reemplazar sus recuadros de figura por capturas originales, sin credenciales, tokens, claves ni datos sensibles. En tu terminal local (sin guardar el valor en archivos del repositorio): `export API_HOST='TU_DNS_O_IP_EC2'`, `curl -i "http://$API_HOST/api/health"`. Sustituir los marcadores en los demás ejemplos antes de ejecutarlos. Guion sugerido para una demo en vivo:
@@ -169,13 +227,36 @@ Secuencia de `scripts/deploy.sh` invocado por `.github/workflows/main.yml`: dete
 
 ### Guion de demostración en vivo
 
+En una terminal separada, con `API_HOST` configurado, comenzar **antes del push** esta medición y detenerla después con `Ctrl+C`; anotar cualquier código distinto de `200` (incluido `000` por falta de conexión):
+
+```bash
+while true; do
+  printf '%s ' "$(date +%T)"
+  curl -sS -o /dev/null -w '%{http_code}\n' --max-time 2 "http://$API_HOST/api/health" || echo FALLO
+  sleep 0.5
+done
+```
+
 1. **Antes del push:** abrir GitHub → **Actions**, Docker Hub → repositorio → **Tags**, una terminal con `curl http://<DNS_O_IP_EC2>/api/health` y otra con `docker ps -a` en EC2. Crear un item de prueba con `POST /api/items` y conservar su ID para verificar que los datos sobreviven.
 2. Agregar **en la misma línea de la respuesta de `/api/health` en `index.js`** un campo `demo: 'Cambio en vivo'` sin quitar `message` ni `version`; la prueba actual verifica esos dos campos y seguirá funcionando. Ejecutar `npm run test:coverage`, `git add index.js`, `git commit -m "Demostracion de despliegue"` y `git push origin main`. El nuevo dato `demo` debe aparecer en la respuesta remota después del CD.
 3. **Mientras se ejecuta:** capturar GitHub Actions → ejecución del SHA → job **test** con el resumen de cobertura; job **publish**; job **deploy** con el color final. Capturar Docker Hub → **Tags** mostrando `latest` y el SHA de ese mismo commit. No mostrar Secrets, archivos `.pem` ni el PAT.
 4. **Al terminar:** capturar `curl -i http://<DNS_O_IP_EC2>/api/health` (`version` igual al SHA y `demo` presente), `docker ps -a` (nuevo color activo y anterior detenido) y `GET /api/items/<ID>` para constatar persistencia. En AWS Console capturar instancia y security group sin claves. En una terminal adicional repetir consultas a `/api/health` durante el push y anotar cualquier respuesta diferente de `200`: el objetivo es documentar la continuidad, no afirmar que se probó sin medirla. El primer despliegue no dispone de versión anterior.
 5. Incorporar las capturas auténticas en `figuras/`, explicar el proceso y el resultado de cada figura, completar portada y tabla de resultados en `reporte.tex` y compilar el PDF. Entregar al docente el enlace GitHub, la URL pública de EC2 y el PDF por el canal indicado, no como valores fijos del código público.
 
-Antes de entregar, completar las macros de portada en `reporte.tex` y colocar el logotipo autorizado en `figuras/logo-institucional.png`. Guardar capturas reales en `figuras/`, sustituir los recuadros `\capturaPendiente{...}` por `\includegraphics[width=.9\linewidth]{figuras/archivo.png}` y actualizar la tabla de resultados con enlaces/fechas/SHA. No hay capturas ni URL pública de un despliegue verificadas todavía; las cifras locales de cobertura sí están medidas. Para generar el PDF, con una distribución LaTeX que incluya `babel`, `hyperref` y `graphicx`, usar `pdflatex reporte.tex` dos veces (segunda pasada para referencias), `latexmk -pdf reporte.tex` o compilar `reporte.tex` en Overleaf. En esta máquina no hay compilador LaTeX; el PDF y la inserción de evidencias son pasos externos. Los archivos auxiliares del compilador no deben añadirse a Git.
+### Capturas y generación del PDF
+
+1. Completar en las líneas iniciales de `reporte.tex` las macros `\Institucion`, `\Programa`, `\Asignatura`, `\Docente`, `\Integrantes`, `\Grupo` y `\LugarFecha`. Sustituir los corchetes por datos reales. Con permiso institucional, colocar el logotipo como `figuras/logo-institucional.png`.
+2. Crear `figuras/` y guardar **capturas auténticas** como `pruebas.png` (salida de Jest), `actions.png` (jobs/SHA), `dockerhub.png` (tags) y `despliegue.png` (HTTP y contenedores). En cada figura de `reporte.tex` cambiar `\capturaPendiente{...}` por `\includegraphics[width=.9\linewidth]{figuras/archivo.png}` con el nombre correspondiente. Mantener `\caption{...}` y explicar en el párrafo próximo **cómo** se obtuvo la imagen y **qué resultado** demuestra. No incluir Secrets ni claves; registrar SHA, fecha y enlace de ejecución cuando existan.
+3. Compilar desde tu PC **Linux** (no es necesario instalar LaTeX en EC2). En Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y texlive-latex-base texlive-latex-recommended texlive-lang-spanish texlive-fonts-recommended
+pdflatex -interaction=nonstopmode -halt-on-error reporte.tex
+pdflatex -interaction=nonstopmode -halt-on-error reporte.tex
+```
+
+Como alternativa, subir `reporte.tex` y la carpeta `figuras/` a **Overleaf**, pulsar **Recompile** y descargar el PDF. En esta máquina aún no está instalado LaTeX y la portada/capturas externas dependen de tus datos; `reporte.pdf` se entrega aparte y está ignorado por Git. No presentar el PDF mientras conserve el texto «CAPTURA PENDIENTE». Verificar que la introducción ocupa al menos una página completa, el texto está justificado, las figuras están enumeradas, la conclusión tiene al menos dos párrafos y se citan al menos tres fuentes.
 
 ## Lecturas oficiales
 

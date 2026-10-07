@@ -113,7 +113,11 @@ function createApp(db) {
     app.get('/api/health', async (req, res) => {
         try {
             await get(db, 'SELECT 1 AS ok');
-            return reply(res, 200, [{ message: 'API operativa', version: process.env.APP_VERSION || 'local' }]);
+            return reply(res, 200, [{ 
+                message: 'API operativa', 
+                version: process.env.APP_VERSION || 'local',
+                demo: 'Cambio en vivo desde UTEQ' // El nuevo campo añadido para detonar el CD
+            }]);
         } catch (error) {
             return reply(res, 503, [{ error: 'Base de datos no disponible' }]);
         }
