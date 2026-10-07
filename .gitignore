@@ -1,33 +1,29 @@
-node_modules/
-coverage/
-.nyc_output/
+# Ignorar todo en la raíz por defecto
+/*
+
+# Entregables del profesor
+!/.github/
+!/Dockerfile
+!/.dockerignore
+!/README.md
+
+# Código fuente y pruebas
+!/index.js
+!/package.json
+!/package-lock.json
+!/tests/
+
+# Usados por el workflow de despliegue (scp en main.yml)
+!/scripts/
+!/nginx/
+
+!/.gitignore
+
+# Defensa extra dentro de las carpetas permitidas
 .env
 .env.*
-!.env.example
-# Llaves y credenciales locales: siempre en GitHub Secrets, nunca en Git.
 *.pem
 *.key
-*.p12
-*.pfx
-id_rsa*
-id_ed25519*
-*known_hosts*
-.ssh/
-.aws/
 *.sqlite
-*.sqlite-*
-backup_*
-data/
-backups/
-docker-desktop-*.pkg.tar.zst
-rutas
-reporte.pdf
-*.aux
-*.log
-*.out
-*.toc
-*.fls
-*.fdb_latexmk
-*.synctex.gz
-npm-debug.log*
-.DS_Store
+node_modules/
+coverage/
