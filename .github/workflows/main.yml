@@ -1,0 +1,76 @@
+name: CI and deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Test and enforce 70% coverage
+        run: npm run test:coverage -- --coverageThreshold='{"global":{"branches":70,"functions":70,"lines":70,"statements":70}}'
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/devops-practica:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/devops-practica:${{ github.sha }}
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    concurrency:
+      group: devops-practica-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage infrastructure and deploy on EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE_SHA: ${{ github.sha }}
+          REMOTE_DIR: /tmp/devops-practica-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          set +x
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/devops_deploy"
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/devops_deploy" "$HOME/.ssh/known_hosts"
+          ssh_opts=(-i "$HOME/.ssh/devops_deploy" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes)
+          ssh "${ssh_opts[@]}" "$EC2_USER@$EC2_HOST" "mkdir -m 700 -- '$REMOTE_DIR'"
+          scp -q "${ssh_opts[@]}" scripts/deploy.sh nginx/devops-practica.conf nginx/blue.conf nginx/green.conf "$EC2_USER@$EC2_HOST:$REMOTE_DIR/"
+          # Credentials are sent through encrypted stdin, never via ssh command arguments.
+          printf '%s\n%s\n%s\n' "$DOCKERHUB_USERNAME" "$DOCKERHUB_TOKEN" "$IMAGE_SHA" |
+            ssh -T "${ssh_opts[@]}" "$EC2_USER@$EC2_HOST" "bash '$REMOTE_DIR/deploy.sh'"

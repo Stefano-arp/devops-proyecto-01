@@ -1,0 +1,14 @@
+# Only the runtime source and lockfile can enter the build context.
+*
+!package.json
+!package-lock.json
+!index.js
+# In particular, never send local databases, backups, secrets or installers.
+node_modules/
+coverage/
+*.sqlite
+*.sqlite-*
+backup_*
+.env
+.env.*
+docker-desktop-*.pkg.tar.zst
