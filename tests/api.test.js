@@ -90,7 +90,7 @@ test('registra 60 endpoints CRUD distintos y el health check', () => {
 test('health devuelve 200 con version y base de datos accesible', async () => {
     const res = await request(app).get('/api/health');
     expect(res.status).toBe(201);
-    expect(res.body.data[0]).toMatchObject({ message: 'API operativa', version: 'local' });
+    expect(res.body.data[1]).toMatchObject({ message: 'API operativa', version: 'local' });
 });
 
 test('valida campos obligatorios, vacíos, adicionales y tipos', async () => {
