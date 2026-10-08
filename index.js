@@ -105,6 +105,11 @@ function handleError(res, error) {
     return reply(res, 500, [{ error: 'Error interno del servidor' }]);
 }
 
+
+
+
+
+
 function createApp(db) {
     const app = express();
     app.disable('x-powered-by');
@@ -116,12 +121,19 @@ function createApp(db) {
             return reply(res, 200, [{ 
                 message: 'API operativa', 
                 version: process.env.APP_VERSION || 'local',
-                demo: 'Cambio en vivo desde UTEQ' // El nuevo campo añadido para detonar el CD
+                demo: 'Cambio desde' // El nuevo campo añadido para detonar el CD
             }]);
         } catch (error) {
             return reply(res, 503, [{ error: 'Base de datos no disponible' }]);
         }
     });
+
+
+
+
+
+
+
 
     for (const resource of resources) {
         const base = `/api/${resource.route}`;
