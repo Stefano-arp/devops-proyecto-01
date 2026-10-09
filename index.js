@@ -119,7 +119,7 @@ function createApp(db) {
         try {
             await get(db, 'SELECT 1 AS ok');
             return reply(res, 201, [{ 
-                message: 'API operativa al 100', 
+                message: 'API operativa al 200', 
                 version: process.env.APP_VERSION || 'local',
                 demo: 'Cambio desde uteq ' 
             }]);

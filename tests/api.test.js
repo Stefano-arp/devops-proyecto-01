@@ -85,7 +85,14 @@ test('registra 60 endpoints CRUD distintos y el health check', () => {
     expect(routes).toHaveLength(61);
     expect(new Set(routes).size).toBe(61);
     expect(routes).toContain('GET /api/health');
+
 });
+
+
+
+
+
+
 
 
 
@@ -94,6 +101,10 @@ test('health devuelve 200 con version y base de datos accesible', async () => {
     expect(res.status).toBe(201);
     expect(res.body.data[0]).toMatchObject({ message: 'API operativa al 100', version: 'local' });
 });
+
+
+
+
 
 
 
